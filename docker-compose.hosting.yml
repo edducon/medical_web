@@ -1,0 +1,57 @@
+services:
+  db:
+    image: postgres:17-alpine
+    container_name: radioplan_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-radioplan}
+      POSTGRES_USER: ${POSTGRES_USER:-radioplan}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./infra/postgres/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks: [internal]
+
+  api:
+    build: ./apps/api/RadPlan.Api
+    container_name: radioplan_api
+    restart: unless-stopped
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ConnectionStrings__Postgres: Host=db;Port=5432;Database=${POSTGRES_DB:-radioplan};Username=${POSTGRES_USER:-radioplan};Password=${POSTGRES_PASSWORD}
+      Encryption__Key: ${ENCRYPTION_KEY:?Set ENCRYPTION_KEY}
+      Setup__Token: ${SETUP_TOKEN:?Set SETUP_TOKEN}
+      QuestPdf__License: ${QUESTPDF_LICENSE:-Community}
+      DataProtection__Path: /var/lib/radioplan/keys
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - api_keys:/var/lib/radioplan/keys
+    networks: [internal, gateway]
+
+  web:
+    build:
+      context: ./apps/web
+      args:
+        VITE_API_URL: /api
+    container_name: radioplan_web
+    restart: unless-stopped
+    depends_on: [api]
+    networks: [gateway]
+
+networks:
+  internal:
+    internal: true
+  gateway:
+    external: true
+    name: gateway_gateway
+
+volumes:
+  postgres_data:
+  api_keys:
