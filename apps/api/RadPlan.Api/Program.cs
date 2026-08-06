@@ -39,6 +39,7 @@ builder.Services.AddAntiforgery(options => options.HeaderName = "X-CSRF-TOKEN");
 QuestPDF.Settings.License = Enum.TryParse<LicenseType>(builder.Configuration["QuestPdf:License"], true, out var pdfLicense) ? pdfLicense : LicenseType.Community;
 
 var app = builder.Build();
+await app.Services.GetRequiredService<PlanRepository>().BackfillPatientSearchTokensAsync();
 app.UseExceptionHandler(exception => exception.Run(async context =>
 {
     context.Response.StatusCode = StatusCodes.Status500InternalServerError;
@@ -90,6 +91,12 @@ app.MapPost("/api/calculations/remaining", (CalculationRequest request) => Resul
 app.MapGet("/api/scanners", async (PlanRepository repository) => Results.Ok(await repository.GetScannersAsync()));
 app.MapPost("/api/scanners", async (CreateScannerRequest request, PlanRepository repository) => Results.Created("/api/scanners", await repository.AddScannerAsync(request))).RequireAuthorization(new AuthorizeAttribute { Roles = "administrator" });
 app.MapPut("/api/scanners/{id:guid}", async (Guid id, UpdateScannerRequest request, PlanRepository repository) => await repository.UpdateScannerAsync(id, request) ? Results.NoContent() : Results.NotFound()).RequireAuthorization(new AuthorizeAttribute { Roles = "administrator" });
+app.MapGet("/api/scanner-profiles", async (PlanRepository repository) => Results.Ok(await repository.GetScannerProfilesAsync()));
+app.MapPut("/api/scanners/{id:guid}/profiles/{category}", async (Guid id, string category, UpdateScannerProfileRequest request, PlanRepository repository) =>
+{
+    try { return await repository.UpdateScannerProfileAsync(id, category, request) ? Results.NoContent() : Results.NotFound(); }
+    catch (ArgumentException exception) { return Results.BadRequest(new { error = exception.Message }); }
+}).RequireAuthorization(new AuthorizeAttribute { Roles = "administrator" });
 app.MapGet("/api/settings/isotopes", async (PlanRepository repository) => Results.Ok(await repository.GetSettingsAsync()));
 app.MapPut("/api/settings/isotopes/{isotope}", async (string isotope, UpdateIsotopeSettingsRequest request, PlanRepository repository) =>
 {
@@ -113,6 +120,7 @@ app.MapGet("/api/shifts/{date}/{isotopeCode}", async (DateOnly date, string isot
     var shift = await repository.GetShiftAsync(date, isotopeCode);
     return shift is null ? Results.NotFound() : Results.Ok(shift);
 });
+app.MapGet("/api/patients", async (string number, PlanRepository repository) => Results.Ok(await repository.SearchPatientsAsync(number)));
 app.MapPost("/api/shifts", async (ClaimsPrincipal user, CreateShiftRequest request, PlanRepository repository) =>
 {
     try { return Results.Created($"/api/shifts/{request.ShiftDate}/{request.IsotopeCode}", await repository.CreateShiftAsync(UserId(user), request)); }
@@ -125,6 +133,11 @@ app.MapPost("/api/shifts/{shiftId:guid}/appointments", async (ClaimsPrincipal us
         var appointment = await repository.AddAppointmentAsync(UserId(user), shiftId, request);
         return appointment is null ? Results.NotFound() : Results.Created($"/api/appointments/{appointment.Id}", appointment);
     }
+    catch (ArgumentException exception) { return Results.BadRequest(new { error = exception.Message }); }
+});
+app.MapPost("/api/shifts/{shiftId:guid}/close", async (ClaimsPrincipal user, Guid shiftId, PlanRepository repository) =>
+{
+    try { return await repository.CloseShiftAsync(UserId(user), shiftId) ? Results.NoContent() : Results.NotFound(); }
     catch (ArgumentException exception) { return Results.BadRequest(new { error = exception.Message }); }
 });
 app.MapPut("/api/shifts/{shiftId:guid}/source-activity", async (ClaimsPrincipal user, Guid shiftId, UpdateSourceActivityRequest request, PlanRepository repository) =>

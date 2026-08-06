@@ -34,4 +34,18 @@ public sealed class FieldEncryptionService
         aes.Decrypt(payload[..12], payload[28..], payload[12..28], plainText);
         return Encoding.UTF8.GetString(plainText);
     }
+
+    public string Fingerprint(string value)
+    {
+        using var hmac = new HMACSHA256(_key);
+        return Convert.ToHexString(hmac.ComputeHash(Encoding.UTF8.GetBytes(value.Trim().ToUpperInvariant())));
+    }
+
+    public string PatientNumberSearchToken(string prefix) => Fingerprint($"patient-number-prefix:{prefix}");
+
+    public string[] PatientNumberSearchTokens(string number)
+    {
+        var normalized = number.Trim().ToUpperInvariant();
+        return Enumerable.Range(2, Math.Max(0, normalized.Length - 1)).Select(length => PatientNumberSearchToken(normalized[..length])).ToArray();
+    }
 }

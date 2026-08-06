@@ -10,12 +10,21 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./infra/postgres/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+      - ./infra/postgres/migrations:/migrations:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
       interval: 10s
       timeout: 5s
       retries: 5
     networks: [internal]
+
+  api_keys_init:
+    image: alpine:3.22
+    user: "0:0"
+    command: ["sh", "-c", "chown -R 100:101 /keys"]
+    restart: "no"
+    volumes:
+      - api_keys:/keys
 
   api:
     build: ./apps/api/RadPlan.Api
@@ -31,6 +40,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      api_keys_init:
+        condition: service_completed_successfully
     volumes:
       - api_keys:/var/lib/radioplan/keys
     networks: [internal, gateway]
